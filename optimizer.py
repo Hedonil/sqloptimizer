@@ -35,9 +35,7 @@ class ThreadQuery(threading.Thread):
         self.error = None
 
     def run(self):
-        global dbmon, dbexec, id
-        
-        #print self.query
+        global dbmon, dbexec, id, debugOutput
         
         if ( self.type == "mon" ):
             try:
@@ -49,6 +47,7 @@ class ThreadQuery(threading.Thread):
             except Exception as e:
                 self.data = []
                 self.error = str(e) + " id: "+ str(id)
+
             
             finally:
                 cursor.execute("kill "+ str(id) )
@@ -59,9 +58,11 @@ class ThreadQuery(threading.Thread):
                 cursor.execute(self.query)
                 self.data = 'ok'
                 
+                
             except Exception as e:
                 self.data = []
                 self.error = str(e)+ " id: "+ str(id)
+
         
 
         cursor.close()    
@@ -122,15 +123,22 @@ def getDbSelect( selectedDb ):
 
     return select
 
+
 def getRefs( usedDBs, usedTables ):
     
     refs = []
+    dumps = ['enwiki','dewiki','wikidatawiki','commonswiki','centralauth','meta_p']
     
     for db in usedDBs:
-        dump = open( '/data/project/tools-info/schemadumps/'+ db, 'r' ).read()
+        
+        dbdump = db
+        if ( not (db in dumps) ):
+            dbdump = 'enwiki'
+        
+        dump = open( '/data/project/tools-info/schemadumps/'+ dbdump, 'r' ).read()
         tbls = re.split('Table structure for table', dump)
             
-        dump = open( '/data/project/tools-info/schemadumps/views-'+ db, 'r' ).read()
+        dump = open( '/data/project/tools-info/schemadumps/views-'+ dbdump, 'r' ).read()
         views = re.split('View:', dump)
         
         for table in usedTables:
@@ -167,7 +175,7 @@ def getRefs( usedDBs, usedTables ):
     return refList
     
 def runExplain( baseDb, query ):
-    global dbmon, dbexec, id, usedTables
+    global dbmon, dbexec, id, usedTables, debugOutput
 
     dbmon = dbconn( baseDb + '_p' )
     dbexec = dbconn( baseDb + '_p' )
@@ -178,7 +186,7 @@ def runExplain( baseDb, query ):
     resexec = curexec.fetchone()
     id = int(resexec['conid'])
     curexec.close()
-    
+
     querymon = "Show explain for " + str(id)
     queryexec = query
      
@@ -195,6 +203,8 @@ def runExplain( baseDb, query ):
     for res in results:
         res.join()
         resData.append({'type': res.type, 'error': res.error, 'data': res.data})
+        debugOutput.append(res.data)
+        debugOutput.append(res.error)
         
     
     ''' format things '''
@@ -239,7 +249,7 @@ WHERE gu_home_db = 'enwiki' AND rev_len > '2000' AND rev_user_text LIKE 'Ada%'
 GROUP BY page_namespace, page_title
 
 /* 
-Labs SQL Optimizer v0.9 provides real-time analysis of SQL queries.
+Labs SQL Optimizer provides real-time analysis of SQL queries.
 It helps detecting expensive mistakes as shown in this example (no key hit, using temporary, using filesort).
 If you have a longer running query (> ~10 sec), you can also see the execution plan with > SHOW EXPLAIN FOR <thread_id>. Get the thread_id with > SHOW processlist;
 */ '''
@@ -274,7 +284,7 @@ html = u'''
         <div class="panel panel-primary" style="text-align:center">
             <div class="panel-heading">
                 <p class="xt-heading-top" >
-                    <span style="font-family:comic-sans;font-style:italic">fancy<sup>+</sup> &nbsp;</span> <span> Labs SQL Optimizer </span> <small>v0.9</small>
+                    <span style="font-family:comic-sans;font-style:italic">fancy<sup>+</sup> &nbsp;</span> <span> Labs SQL Optimizer </span> <small>%s</small>
                     <a style="padding-left:10px;color:white;font-size:16px;" href="//tools.wmflabs.org/tools-info/" > Tools Info</a>
                     <a style="padding-left:2px;color:white;font-size:16px;" href="//tools.wmflabs.org/xtools/" > &middot; XTools!</a>
                     <a style="float:right;margin-left:-50px;padding-top:10px;color:white;font-size:14px;" href="//de.wikipedia.org/wiki/User:Hedonil" >Hedonil</a>
@@ -297,12 +307,20 @@ html = u'''
                     <span>Tutorials: </span>
                     <a href="//wikitech.wikimedia.org/wiki/Nova_Resource:Tools/Shared_Resources/MySQL_queries" >SQL-Repo</a> &middot; 
                     <a href="//wikitech.wikimedia.org/wiki/Nova_Resource:Tools/Help#Database_access" >Help SQL</a>
+                    &nbsp;&bull;&nbsp;
+                    <span>Repo: </span>
+                    <a href="//github.com/Hedonil/sqloptimizer" >GitHub</a> &middot;
                 </p>
 
-                <p class="alert alert-success xt-alert">You are considered <i>SQL specialist 1st class</i>, if your query hits a key and runs efficiently without "Using temporary" / "Using Filesort"  </p>
+               <!-- <p class="alert alert-success xt-alert">You are considered <i>SQL specialist 1st class</i>, if your query hits a key and runs efficiently without "Using temporary" / "Using Filesort"  </p> -->
                 <br />
                     <form accept-charset="utf-8" method="post" action="?">
-                        <span style="float:left;"> EXPLAIN </span>
+                        <span style="float:left;"> SHOW EXPLAIN </span>
+                        <span style="padding-right:20px">
+                            <span style="border-bottom:1px dotted; " title="auto: Injects a sleep(1) colum to intercept the query.&#10;Suitable for quite simple, short running queries">Mode: </span> &nbsp;
+                            <input type="radio" name="mode" %s value="auto"> auto  &nbsp;
+                            <input type="radio" name="mode" %s value="manual"> manual
+                        </span>
                         <span style="border-bottom:1px dotted; " title="Within this base you can leave the tablenames un-prefixed.&#10;eg: SELECT * FROM page&#10;To access other wikis use syntax <schema>.<tblname>&#10;eg: SELECT * FROM page JOIN commonswiki_p.revision ..." >Query-base: </span> &nbsp; 
                         <select name="base" > %s </select>
                         <textarea style="margin-top:5px;" class="form-control" rows=%s  name="text">%s</textarea>
@@ -318,7 +336,7 @@ html = u'''
                     %s
                 </div>
                 <div>
-                   %s 
+                   
                 </div>            
             </div>
             
@@ -335,15 +353,16 @@ html = u'''
         </div>
     </div>
 </div>
+ %s 
 </body>
 </html>
 ''' 
 
-
+version = 'v0.95'
 usedDbs = []
 usedTables =[]
 outputRows = 12
-debugOutput= ''
+debugOutput = []
 resExplain = ''
 resRefs = ''
 
@@ -354,11 +373,22 @@ rawQuery = form.getvalue("text", None )
 baseDb = form.getvalue("base", "enwiki")
 debug = form.getvalue("debug", None)
 
+mode = form.getvalue("mode", "auto")
+checkedman = ''
+checkedauto = '' 
+if ( mode == "manual"):
+    checkedman = 'checked'
+else:
+    checkedauto = 'checked'
+
 usedDbs.append(baseDb)
 
 if( rawQuery and os.environ['REQUEST_METHOD'] == 'POST' ):
+    
     query = re.sub('explain', '', rawQuery, flags=re.IGNORECASE )
-    query = re.sub('[\s]from[\s]', ' ,sleep(1) FROM ', rawQuery, count=1, flags=re.IGNORECASE )
+    
+    if ( mode == "auto"):
+        query = re.sub('[\s]from[\s]', ' ,sleep(1) FROM ', rawQuery, count=1, flags=re.IGNORECASE )
     
     if ( re.search('commonswiki_p\.', query, flags=re.IGNORECASE) ):
         usedDbs.append( 'commonswiki')
@@ -369,8 +399,8 @@ if( rawQuery and os.environ['REQUEST_METHOD'] == 'POST' ):
     if ( re.search('centralauth_p\.', query, flags=re.IGNORECASE) ):
         usedDbs.append( 'centralauth')
         
-    #debugOutput = query
     resExplain = runExplain( baseDb, query )
+    debugOutput.append(baseDb) 
     resRefs = getRefs( usedDbs, usedTables )
     input = rawQuery
 
@@ -380,9 +410,9 @@ elif( rawQuery and os.environ['REQUEST_METHOD'] == 'GET' ):
 else:
     input = defaultQuery
 
-
+debugOutput = ''
     
-print html % ( getDbSelect(baseDb), outputRows, input, resExplain, debugOutput, resRefs )
+print html % ( version, checkedauto, checkedman, getDbSelect(baseDb), outputRows, input, resExplain, resRefs, debugOutput )
     #print HtmlFormatter().get_style_defs('.highlight')
 
 
