@@ -1,13 +1,14 @@
 #!/usr/bin/python
 
 #  Labs SQL optimizer
-#  v0.9
+#  v1.0
 #  License CC by sa
 #
 #  Hedonil 2014
 #
 
 import threading
+import subprocess
 import time
 import oursql
 import re
@@ -123,6 +124,45 @@ def getDbSelect( selectedDb ):
 
     return select
 
+def getDumpDB(db):
+    global myRedis, debugOutput
+    
+    host = db + ".labsdb"
+    
+    ttl = 86400
+    hash = "toolsinfoSQLDump" + db
+    lc = myRedis.get(hash)
+    
+    if ( not lc ):
+
+        command = [(
+                "mysqldump"
+                " --defaults-file=/data/project/tools-info/replica.my.cnf"
+                " -h " + host + ""
+                " --no-data"
+                " --lock-tables=false" 
+                " --ignore-table="+ db +"._counters "
+                " --skip-add-drop-table" 
+                " --force " + db + ""
+                " 2>/dev/null" 
+            )]
+        
+        try:
+            dump = subprocess.check_output(command, shell=True)
+        except Exception as e:
+            #print str(e)
+            dump = e.output
+            #debugOutput.append(str(e))
+            
+        if ( re.search('Dump completed', dump, flags=re.IGNORECASE) ):
+            myRedis.setex( hash, json.dumps(dump), ttl)
+ 
+    else:
+        dump = json.loads(lc)
+        debugOutput.append('from Redis')
+    
+    return dump
+
 
 def getRefs( usedDBs, usedTables ):
     
@@ -135,7 +175,8 @@ def getRefs( usedDBs, usedTables ):
         if ( not (db in dumps) ):
             dbdump = 'enwiki'
         
-        dump = open( '/data/project/tools-info/schemadumps/'+ dbdump, 'r' ).read()
+        #dump = open( '/data/project/tools-info/schemadumps/'+ dbdump, 'r' ).read()
+        dump = getDumpDB(db)
         tbls = re.split('Table structure for table', dump)
             
         dump = open( '/data/project/tools-info/schemadumps/views-'+ dbdump, 'r' ).read()
@@ -243,7 +284,7 @@ def runExplain( baseDb, query ):
 
 defaultQuery = u'''SELECT page_namespace, page_title, COUNT(*) 
 FROM revision
-JOIN page ON rev_page = page_id AND page_namespace IN (0,1) AND page_title like 'Liste_der%'
+JOIN page ON rev_page = page_id AND page_namespace IN (0,1) AND page_title like 'Li%'
 JOIN centralauth_p.globaluser ON gu_name = rev_user_text
 WHERE gu_home_db = 'enwiki' AND rev_len > '2000' AND rev_user_text LIKE 'Ada%'
 GROUP BY page_namespace, page_title
@@ -358,7 +399,7 @@ html = u'''
 </html>
 ''' 
 
-version = 'v0.95'
+version = 'v1.0'
 usedDbs = []
 usedTables =[]
 outputRows = 12
